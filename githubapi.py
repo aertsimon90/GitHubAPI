@@ -234,7 +234,7 @@ def main():
             input("Press Enter to continue...")
         
         elif choice == "7":
-        	count = int(input("Activation ping count: "))
+        	count = int(input("Activation ping count (use max 2, dont harm github api. just use 1-2 ping for activation): "))
         	for _ in range(count):
         	    name = "."+str(random.randint(0, 1000))+".ping"
         	    api.set_file(name, str(random.random()), "Activate Ping. (Ignore this, just a repo board activation)")
