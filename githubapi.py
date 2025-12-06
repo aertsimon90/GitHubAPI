@@ -23,7 +23,8 @@ class GitHubAPI:
             return response.json().get('sha')
         return None
 
-    def get_file(self, targetfile):
+    
+    def get_file(self, targetfile, local_path=None):
         url = self.base_url + targetfile
         response = requests.get(url, headers=self.headers)
         
@@ -31,7 +32,20 @@ class GitHubAPI:
             data = response.json()
             if data.get('type') == 'file':
                 content_base64 = data.get('content', '')
-                return base64.b64decode(content_base64).decode('utf-8')
+                content = base64.b64decode(content_base64)
+                
+                if local_path:
+                    try:
+                        
+                        with open(local_path, 'wb') as f:
+                            f.write(content)
+                        return f"Success: File saved to {local_path}"
+                    except Exception as e:
+                        return f"Error: Failed to save file locally: {e}"
+                
+                
+                return content.decode('utf-8')
+
             return f"Error: {targetfile} is not a file."
         elif response.status_code == 404:
             return f"Error: {targetfile} not found (404)."
@@ -41,9 +55,14 @@ class GitHubAPI:
         url = self.base_url + targetfile
         
         sha = self._get_sha(targetfile)
-        
-        content_base64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
-        
+
+        if isinstance(content, str):
+            content_base64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
+        elif isinstance(content, bytes):
+             content_base64 = base64.b64encode(content).decode('utf-8')
+        else:
+             return "Error: Content must be string or bytes.", None
+
         payload = {
             "message": commit_message,
             "content": content_base64
@@ -56,7 +75,7 @@ class GitHubAPI:
         
         if response.status_code in [200, 201]:
             return "Success", response.json()
-        return f"Error: Failed operation. Status Code: {response.status_code}", None
+        return f"Error: Failed operation. Status Code: {response.status_code} - {response.json().get('message', 'Unknown Error')}", None
 
     def del_file(self, targetfile, commit_message="File deleted."):
         url = self.base_url + targetfile
@@ -75,7 +94,7 @@ class GitHubAPI:
 
         if response.status_code == 200:
             return "Success", response.json()
-        return f"Error: Failed to delete file. Status Code: {response.status_code}", None
+        return f"Error: Failed to delete file. Status Code: {response.status_code} - {response.json().get('message', 'Unknown Error')}", None
 
     def list_dir(self, targetdir=""):
         url = self.base_url + targetdir
@@ -110,7 +129,7 @@ class GitHubAPI:
         if "Success" in result:
             return "Success", data
         elif "not found" in result:
-             return f"Info: .gitkeep in {targetdir} not found.", data
+             return f"Info: .gitkeep in {targetdir} not found. Directory might be empty.", data
         return f"Error: Directory deletion failed: {result}", data
 
     def is_file(self, targetpath):
@@ -124,21 +143,55 @@ class GitHubAPI:
             return data.get('type')
         return None
 
+    
+    def move_file(self, old_path, new_path, commit_message="File moved."):
+        
+        url_old = self.base_url + old_path
+        response_old = requests.get(url_old, headers=self.headers)
+        
+        if response_old.status_code != 200:
+            return f"Error: Failed to fetch old file content. Status Code: {response_old.status_code}", None
+        
+        data_old = response_old.json()
+        if data_old.get('type') != 'file':
+            return f"Error: {old_path} is not a file.", None
+        
+        content_base64 = data_old.get('content', '')
+        content_bytes = base64.b64decode(content_base64)
+        
+        
+        new_commit_message = f"Move: {old_path} -> {new_path}" if commit_message == "File moved." else commit_message
+        status_set, data_set = self.set_file(new_path, content_bytes, new_commit_message)
+        
+        if "Success" not in status_set:
+            return f"Error: Failed to create file at new path: {status_set}", data_set
+            
+        
+        status_del, data_del = self.del_file(old_path, new_commit_message)
+        
+        if "Success" not in status_del:
+        
+            return f"Warning: File created at {new_path}, but failed to delete old file {old_path}. Delete manually. Error: {status_del}", data_set
+        
+        return f"Success: File moved from {old_path} to {new_path}", data_set
+
+
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
 def main_menu():
     print("\n=== GitHub Repository Manager ===")
     print("1. List Directory")
-    print("2. Read File")
+    print("2. Read/Download File")
     print("3. Upload/Edit File (from local file)")
     print("4. Delete File")
     print("5. Create Directory")
     print("6. Delete Directory")
-    print("7. Active Ping")
-    print("8. Exit")
+    print("7. Move/Rename File")
+    print("8. Active Ping")
+    print("9. Exit") 
     print("-" * 40)
-    return input("Choose an option (1-8): ").strip()
+    return input("Choose an option (1-9): ").strip()
 
 def main():
     clear_screen()
@@ -156,12 +209,12 @@ def main():
 
     api = GitHubAPI(username, repository, token)
 
-    # Test connection
+    
     print("\nTesting connection...")
     test = api.list_dir("")
     if isinstance(test, str) and "Error" in test:
         print(f"Connection failed: {test}")
-        print("Check your token, username, or repository name.")
+        print("Check your token, permissions, username, or repository name.")
         return
     else:
         print(f"Successfully connected to {username}/{repository}\n")
@@ -185,10 +238,19 @@ def main():
             input("\nPress Enter to continue...")
 
         elif choice == "2":
-            path = input("\nFile path to read: ").strip()
-            content = api.get_file(path)
+            path = input("\nFile path to read/download: ").strip()
+            
+            local_path = input("Local path to save (optional, leave empty to display): ").strip() or None
+            
+            content = api.get_file(path, local_path)
+            
             print("\n" + "="*60)
-            print(content if "Error" not in content else content)
+            if local_path and "Success" in content:
+                 print(content)
+            elif "Error" not in content:
+                print(content)
+            else:
+                print(content)
             print("="*60)
             input("\nPress Enter to continue...")
 
@@ -201,7 +263,7 @@ def main():
                 input("Press Enter to continue...")
                 continue
 
-            with open(local_path, 'r', encoding='utf-8') as f:
+            with open(local_path, 'rb') as f: # Dosyayı ikili (binary) olarak oku
                 content = f.read()
 
             message = input("Commit message (empty = default): ").strip()
@@ -227,13 +289,21 @@ def main():
             input("Press Enter to continue...")
 
         elif choice == "6":
-            path = input("\nDirectory to delete (must be empty): ").strip()
+            path = input("\nDirectory to delete (must be empty or contain only .gitkeep): ").strip()
             msg = input("Commit message (empty = default): ").strip() or "Directory deleted"
             status, _ = api.del_dir(path, msg)
             print(status)
             input("Press Enter to continue...")
+
+        elif choice == "7": 
+            old_path = input("\nOld file path (source): ").strip()
+            new_path = input("New file path (target): ").strip()
+            msg = input("Commit message (empty = default): ").strip() or "File moved"
+            status, _ = api.move_file(old_path, new_path, msg)
+            print(status)
+            input("\nPress Enter to continue...")
         
-        elif choice == "7":
+        elif choice == "8":
         	count = int(input("Activation ping count (use max 2, dont harm github api. just use 1-2 ping for activation): "))
         	for _ in range(count):
         	    name = "."+str(random.randint(0, 1000))+".ping"
@@ -241,7 +311,7 @@ def main():
         	    api.del_file(name)
         	input("Press Enter to continue...")
         
-        elif choice == "8":
+        elif choice == "9": 
             print("Goodbye!")
             break
 
@@ -256,4 +326,4 @@ if __name__ == "__main__":
         print("\n\nExiting...")
     except Exception as e:
         print(f"Unexpected error: {e}")
-        input("Press Enter to exit...")
+        input("Press Enter to exit...") 
