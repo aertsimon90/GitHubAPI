@@ -44,7 +44,7 @@ class GitHubAPI:
                         return f"Error: Failed to save file locally: {e}"
                 
                 
-                return "".join([chr(h) for h in content])
+                return content.decode("utf-8")
 
             return f"Error: {targetfile} is not a file."
         elif response.status_code == 404:
@@ -57,7 +57,7 @@ class GitHubAPI:
         sha = self._get_sha(targetfile)
 
         if isinstance(content, str):
-            content_base64 = base64.b64encode(bytes([ord(h) for h in content])).decode('utf-8')
+            content_base64 = base64.b64encode(content.encode("utf-8")).decode('utf-8')
         elif isinstance(content, bytes):
              content_base64 = base64.b64encode(content).decode('utf-8')
         else:
